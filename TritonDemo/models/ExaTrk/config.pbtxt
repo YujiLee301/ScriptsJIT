@@ -1,0 +1,17 @@
+name: "ExaTrk"
+platform: "onnxruntime_onnx"
+max_batch_size : 500
+input [
+  {
+    name: "sp_features"
+    data_type: TYPE_FP32
+    dims: [ 3 ]
+  }
+]
+output [
+  {
+    name: "embedding_output"
+    data_type: TYPE_FP32
+    dims: [ 8 ]
+  }
+]
