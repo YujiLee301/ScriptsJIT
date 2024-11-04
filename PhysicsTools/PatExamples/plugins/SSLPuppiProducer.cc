@@ -17,8 +17,14 @@
 #include "HeterogeneousCore/SonicTriton/interface/TritonEDProducer.h"
 #include "FWCore/Framework/interface/Frameworkfwd.h"
 #include "FWCore/Framework/interface/stream/EDProducer.h"
-
-
+#include "DataFormats/PatCandidates/interface/PackedGenParticle.h"
+#include "DataFormats/JetReco/interface/CaloJet.h"
+#include "DataFormats/ParticleFlowCandidate/interface/PFCandidate.h"
+#include "fastjet/ClusterSequence.hh"
+#include "fastjet/PseudoJet.hh"
+#include "TLorentzVector.h"
+#include "TCanvas.h"
+#include "TH1D.h"
 //
 // class declaration
 //
@@ -32,9 +38,11 @@ public:
 
   static void fillDescriptions(edm::ConfigurationDescriptions& descriptions);
   float deltaRcut = 0.8;
+  float jetRadius_ = 0.8;
   int64_t npf;
-
-private:
+  TH1D* hist;
+private:  
+  edm::EDGetTokenT<std::vector<pat::PackedGenParticle>> genParticleSrc_;
   const edm::EDGetTokenT<std::vector<pat::PackedCandidate>> pf_token_;
   const unsigned int max_n_pf_;
 
@@ -48,9 +56,6 @@ private:
 
 //
 // constants, enums and typedefs
-//
-
-//
 // static data member definitions
 //
 
@@ -59,10 +64,19 @@ private:
 //
 SSLPuppiProducer::SSLPuppiProducer(const edm::ParameterSet& cfg)
     :TritonEDProducer<>(cfg),
+    genParticleSrc_(mayConsume<std::vector<pat::PackedGenParticle>>(cfg.getParameter<edm::InputTag>("genParticleSrc"))),
     pf_token_(consumes<std::vector<pat::PackedCandidate>>(cfg.getParameter<edm::InputTag>("pf_src"))),
-      max_n_pf_(cfg.getParameter<unsigned int>("max_n_pf")) {
+    max_n_pf_(cfg.getParameter<unsigned int>("max_n_pf")) {
   //register your products
-  produces<std::vector<float>>();
+  produces<std::vector<float>>("SSLscore");
+  produces<std::vector<float>>("pfeta");
+  produces<std::vector<float>>("pfphi");
+  produces<std::vector<float>>("pfpuppipt");
+  produces<std::vector<float>>("geneta");
+  produces<std::vector<float>>("genphi");
+  produces<std::vector<float>>("genpt"); 
+  produces<std::vector<float>>("massdiff");
+  hist = new TH1D("mass_diff", "Mass diff", 40, -1, 1);
   /* Examples
   produces<ExampleData2>();
 
@@ -76,6 +90,12 @@ SSLPuppiProducer::SSLPuppiProducer(const edm::ParameterSet& cfg)
 }
 
 SSLPuppiProducer::~SSLPuppiProducer() {
+   TCanvas* canvas = new TCanvas("canvas", "Canvas", 800, 600);
+   hist->Draw();
+   canvas->SaveAs("hist_mass_diff.png");
+   delete canvas;
+   delete hist;
+
   
 }
 //
@@ -181,9 +201,75 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
    const auto& outputs = output0.fromServer<float>(); 
    //std::auto_ptr<std::vector<float> > SSLscore( new std::vector<float> );
    auto  SSLscore = std::make_unique<std::vector<float>>();
-   for(int i=0; i<npf; i++) {SSLscore->push_back(outputs[0][i]);}
+   auto  pf_eta = std::make_unique<std::vector<float>>();
+   auto  pf_phi = std::make_unique<std::vector<float>>();
+   auto  pf_puppipt = std::make_unique<std::vector<float>>();
+   auto  gen_eta = std::make_unique<std::vector<float>>();
+   auto  gen_phi = std::make_unique<std::vector<float>>();
+   auto  gen_pt = std::make_unique<std::vector<float>>();
+   auto  mass_diff = std::make_unique<std::vector<float>>();
+   unsigned int i=0;
+   auto const& pfs = iEvent.get(pf_token_);
+   edm::Handle<std::vector<pat::PackedGenParticle>> genParticles;
+   iEvent.getByToken(genParticleSrc_, genParticles);
+   std::vector<fastjet::PseudoJet> pfJetInputs;
+   for (const auto& pf_count : pfs){
+    if (abs(pf_count.eta()>2.5)) SSLscore->push_back(-1);
+    else SSLscore->push_back(outputs[0][i]);
+    pf_eta->push_back(pf_count.eta());
+    pf_phi->push_back(pf_count.phi());
+    pf_puppipt->push_back(pf_count.pt()*outputs[0][i]);
+    i++;
+    if ((pf_count.pt()*outputs[0][i] > 0.5)&&(abs(pf_count.eta())<2.5)) {
+	    TLorentzVector pf_;
+	    pf_.SetPtEtaPhiM(pf_count.pt()*outputs[0][i],pf_count.eta(),pf_count.phi(),0);
+   	    pfJetInputs.emplace_back(pf_.Px(), pf_.Py(), pf_.Pz(), pf_.E());
+        }
+   }
+   std::vector<fastjet::PseudoJet> GenJetInputs;
+   for(const auto& particle : *genParticles){
+	   if(particle.status()!=1) continue;
+    gen_eta->push_back(particle.eta());
+    gen_pt->push_back(particle.pt());
+    gen_phi->push_back(particle.phi());    
+    if (particle.pt() > 0) {
+            TLorentzVector pfgen_;
+            pfgen_.SetPtEtaPhiM(particle.pt(),particle.eta(),particle.phi(),0);
+            GenJetInputs.emplace_back(pfgen_.Px(), pfgen_.Py(), pfgen_.Pz(), pfgen_.E());
+        }
+
+   }
+   fastjet::JetDefinition jetDef(fastjet::antikt_algorithm, jetRadius_);
+   fastjet::ClusterSequence csPf(pfJetInputs, jetDef);
+   fastjet::ClusterSequence csGen(GenJetInputs, jetDef);
+
+   std::vector<fastjet::PseudoJet> jetsPf = sorted_by_pt(csPf.inclusive_jets());
+   std::vector<fastjet::PseudoJet> jetsGen = sorted_by_pt(csGen.inclusive_jets());
+   
+   std::vector<float> massdiff;
+   //Matching & calculate invmass
+   for (const auto& jetpf : jetsPf) {
+	   for (const auto& jetGen : jetsGen) {
+		   TLorentzVector pfp4,genp4;
+		   pfp4.SetPxPyPzE(jetpf.px(), jetpf.py(), jetpf.pz(), jetpf.e());
+		   genp4.SetPxPyPzE(jetGen.px(), jetGen.py(), jetGen.pz(), jetGen.e());
+		   if (pfp4.DeltaR(genp4)<0.3){
+			   massdiff.push_back((pfp4.M()-genp4.M())/genp4.M());
+			   hist->Fill((pfp4.M()-genp4.M())/genp4.M());
+		   }
+	   }
+   }
+   //for(int i=0; i<npf; i++) {SSLscore->push_back(outputs[0][i]);}
    //for(int i=0; i<npf; i++) {std::cout<<outputs[0][i]<<std::endl;} 
-   iEvent.put(std::move(SSLscore));
+
+   iEvent.put(std::move(SSLscore),"SSLscore");
+   iEvent.put(std::move(pf_eta),"pfeta");
+   iEvent.put(std::move(pf_phi),"pfphi");
+   iEvent.put(std::move(pf_puppipt),"pfpuppipt");
+   iEvent.put(std::move(gen_eta),"geneta");
+   iEvent.put(std::move(gen_phi),"genphi");
+   iEvent.put(std::move(gen_pt),"genpt");
+   iEvent.put(std::move(mass_diff),"massdiff");
 }
 
 
@@ -226,6 +312,7 @@ void SSLPuppiProducer::fillDescriptions(edm::ConfigurationDescriptions& descript
   // Please change this to state exactly what you do use, even if it is no parameters
   edm::ParameterSetDescription desc;
   TritonClient::fillPSetDescription(desc);
+  desc.add<edm::InputTag>("genParticleSrc", edm::InputTag("packedGenParticles"));
   desc.add<edm::InputTag>("pf_src", edm::InputTag("packedPFCandidates"));
   desc.add<unsigned int>("max_n_pf", 4500);
   descriptions.add("SSLPuppiProducer", desc);
