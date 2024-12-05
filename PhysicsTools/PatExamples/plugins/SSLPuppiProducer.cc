@@ -24,6 +24,7 @@
 #include "fastjet/PseudoJet.hh"
 #include "TLorentzVector.h"
 #include "TCanvas.h"
+#include "TLegend.h"
 #include "TH1D.h"
 //
 // class declaration
@@ -40,7 +41,9 @@ public:
   float deltaRcut = 0.8;
   float jetRadius_ = 0.8;
   int64_t npf;
-  TH1D* hist;
+  TH1D* h_gnn;
+  TH1D* h_pf;
+  TH1D* h_puppi;
 private:  
   edm::EDGetTokenT<std::vector<pat::PackedGenParticle>> genParticleSrc_;
   const edm::EDGetTokenT<std::vector<pat::PackedCandidate>> pf_token_;
@@ -76,7 +79,9 @@ SSLPuppiProducer::SSLPuppiProducer(const edm::ParameterSet& cfg)
   produces<std::vector<float>>("genphi");
   produces<std::vector<float>>("genpt"); 
   produces<std::vector<float>>("massdiff");
-  hist = new TH1D("mass_diff", "Mass diff", 40, -1, 1);
+  h_gnn = new TH1D("mass_diff_GNN", "Mass diff", 40, -1, 1);
+  h_puppi = new TH1D("mass_diff_PUPPI", "Mass diff", 40, -1, 1);
+  h_pf = new TH1D("mass_diff_PF", "Mass diff", 40, -1, 1);
   /* Examples
   produces<ExampleData2>();
 
@@ -91,10 +96,37 @@ SSLPuppiProducer::SSLPuppiProducer(const edm::ParameterSet& cfg)
 
 SSLPuppiProducer::~SSLPuppiProducer() {
    TCanvas* canvas = new TCanvas("canvas", "Canvas", 800, 600);
-   hist->Draw();
+   h_pf->SetDirectory(0);
+   h_puppi->SetDirectory(0);
+   h_gnn->SetDirectory(0);
+
+   h_pf->SetLineColor(kRed);
+   h_puppi->SetLineColor(kGreen);
+   h_gnn->SetLineColor(kBlue);
+
+   h_pf->SetLineWidth(2);
+   h_puppi->SetLineWidth(2);
+   h_gnn->SetLineWidth(2);
+
+   h_gnn->GetXaxis()->SetTitle("mass diff");
+   h_gnn->GetYaxis()->SetTitle("A.U.");
+
+   h_puppi->Draw("h");
+   h_gnn->Draw("h,same");
+   h_pf->Draw("h,same");
+   
+
+   TLegend* legend = new TLegend(0.2, 0.65, 0.35, 0.8);
+   legend->AddEntry(h_pf, "PF", "l");
+   legend->AddEntry(h_puppi, "PUPPI", "l");
+   legend->AddEntry(h_gnn, "SSL", "l");
+   legend->Draw("same");
+   
    canvas->SaveAs("hist_mass_diff.png");
    delete canvas;
-   delete hist;
+   delete h_gnn;
+   delete h_pf;
+   delete h_puppi;
 
   
 }
@@ -117,7 +149,7 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
   size_t i_pf = 0;
 
   for (const auto& pf_count : pfs){
-    if (abs(pf_count.eta()>2.5)) continue;
+    if (abs(pf_count.eta())>2.5) continue;
     num_node++;
   }
   input_0.setShape(0, num_node);
@@ -125,7 +157,7 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
   auto pfnode = input_0.allocate<float>();
   auto& vpfnode = (*pfnode)[0];
   for (const auto& pf : pfs){
-    if (abs(pf.eta()>2.5)) continue;
+    if (abs(pf.eta())>2.5) continue;
     vpfnode.push_back(pf.eta());
     vpfnode.push_back(pf.phi());
     vpfnode.push_back(pf.pt());
@@ -138,7 +170,10 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
       if (abs(pf.pdgId())==22){
         vpfnode.push_back(0);vpfnode.push_back(1);vpfnode.push_back(0);
       }
-      if (abs(pf.pdgId())==130){
+      else if (abs(pf.pdgId())==130){
+        vpfnode.push_back(0);vpfnode.push_back(0);vpfnode.push_back(1);
+      }
+      else {
         vpfnode.push_back(0);vpfnode.push_back(0);vpfnode.push_back(1);
       }
     }
@@ -156,7 +191,7 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
     }
   
     vpfnode.push_back(0);
-    ++i_pf;
+    i_pf++;
     if (i_pf == max_n_pf_)  break;
   }
   if (pf_eta.size()==0) return;
@@ -213,18 +248,28 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
    edm::Handle<std::vector<pat::PackedGenParticle>> genParticles;
    iEvent.getByToken(genParticleSrc_, genParticles);
    std::vector<fastjet::PseudoJet> pfJetInputs;
+   std::vector<fastjet::PseudoJet> puppiJetInputs;
+   std::vector<fastjet::PseudoJet> gnnJetInputs;
    for (const auto& pf_count : pfs){
-    if (abs(pf_count.eta()>2.5)) SSLscore->push_back(-1);
+    if (abs(pf_count.eta())>2.5){
+     SSLscore->push_back(-1);
+     continue;
+    } 
     else SSLscore->push_back(outputs[0][i]);
     pf_eta->push_back(pf_count.eta());
     pf_phi->push_back(pf_count.phi());
     pf_puppipt->push_back(pf_count.pt()*outputs[0][i]);
-    i++;
-    if ((pf_count.pt()*outputs[0][i] > 0.5)&&(abs(pf_count.eta())<2.5)) {
-	    TLorentzVector pf_;
-	    pf_.SetPtEtaPhiM(pf_count.pt()*outputs[0][i],pf_count.eta(),pf_count.phi(),0);
-   	    pfJetInputs.emplace_back(pf_.Px(), pf_.Py(), pf_.Pz(), pf_.E());
+    if ((pf_count.pt()> 0)&&(abs(pf_count.eta())<2.5)) {
+	    TLorentzVector pf_,puppi_,gnn_;
+	    pf_.SetPtEtaPhiM(pf_count.pt(),pf_count.eta(),pf_count.phi(),0);
+      if (pf_count.charge()==0) gnn_.SetPtEtaPhiM(pf_count.pt()*outputs[0][i],pf_count.eta(),pf_count.phi(),0);
+      else gnn_.SetPtEtaPhiM(pf_count.pt()*pf_count.puppiWeight(),pf_count.eta(),pf_count.phi(),0);
+      puppi_.SetPtEtaPhiM(pf_count.pt()*pf_count.puppiWeight(),pf_count.eta(),pf_count.phi(),0);
+   	  pfJetInputs.emplace_back(pf_.Px(), pf_.Py(), pf_.Pz(), pf_.E());
+      gnnJetInputs.emplace_back(gnn_.Px(), gnn_.Py(), gnn_.Pz(), gnn_.E());
+      puppiJetInputs.emplace_back(puppi_.Px(), puppi_.Py(), puppi_.Pz(), puppi_.E());
         }
+    i++;
    }
    std::vector<fastjet::PseudoJet> GenJetInputs;
    for(const auto& particle : *genParticles){
@@ -232,7 +277,7 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
     gen_eta->push_back(particle.eta());
     gen_pt->push_back(particle.pt());
     gen_phi->push_back(particle.phi());    
-    if (particle.pt() > 0) {
+    if (particle.pt() > 0.5) {
             TLorentzVector pfgen_;
             pfgen_.SetPtEtaPhiM(particle.pt(),particle.eta(),particle.phi(),0);
             GenJetInputs.emplace_back(pfgen_.Px(), pfgen_.Py(), pfgen_.Pz(), pfgen_.E());
@@ -241,24 +286,45 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
    }
    fastjet::JetDefinition jetDef(fastjet::antikt_algorithm, jetRadius_);
    fastjet::ClusterSequence csPf(pfJetInputs, jetDef);
+   fastjet::ClusterSequence csGNN(gnnJetInputs, jetDef);
+   fastjet::ClusterSequence csPUPPI(puppiJetInputs, jetDef);
    fastjet::ClusterSequence csGen(GenJetInputs, jetDef);
 
    std::vector<fastjet::PseudoJet> jetsPf = sorted_by_pt(csPf.inclusive_jets());
+   std::vector<fastjet::PseudoJet> jetsPUPPI = sorted_by_pt(csPUPPI.inclusive_jets());
+   std::vector<fastjet::PseudoJet> jetsGNN = sorted_by_pt(csGNN.inclusive_jets());
    std::vector<fastjet::PseudoJet> jetsGen = sorted_by_pt(csGen.inclusive_jets());
    
    std::vector<float> massdiff;
    //Matching & calculate invmass
-   for (const auto& jetpf : jetsPf) {
-	   for (const auto& jetGen : jetsGen) {
-		   TLorentzVector pfp4,genp4;
-		   pfp4.SetPxPyPzE(jetpf.px(), jetpf.py(), jetpf.pz(), jetpf.e());
-		   genp4.SetPxPyPzE(jetGen.px(), jetGen.py(), jetGen.pz(), jetGen.e());
-		   if (pfp4.DeltaR(genp4)<0.3){
-			   massdiff.push_back((pfp4.M()-genp4.M())/genp4.M());
-			   hist->Fill((pfp4.M()-genp4.M())/genp4.M());
+   for (const auto& jetGen : jetsGen) {
+      TLorentzVector genp4;
+      genp4.SetPxPyPzE(jetGen.px(), jetGen.py(), jetGen.pz(), jetGen.e());
+	    for (const auto& jetpf : jetsPf){
+       TLorentzVector pfp4; 		   
+		   pfp4.SetPxPyPzE(jetpf.px(), jetpf.py(), jetpf.pz(), jetpf.e());		   
+		   if (pfp4.DeltaR(genp4)<0.1){
+			   h_pf->Fill((pfp4.M()-genp4.M())/genp4.M());
+		   }
+	   }
+     for (const auto& jetpuppi : jetsPUPPI){
+       TLorentzVector puppip4; 		   
+		   puppip4.SetPxPyPzE(jetpuppi.px(), jetpuppi.py(), jetpuppi.pz(), jetpuppi.e());		   
+		   if (puppip4.DeltaR(genp4)<0.1){
+			   h_puppi->Fill((puppip4.M()-genp4.M())/genp4.M());
+		   }
+	   }
+     for (const auto& jetGNN : jetsGNN){
+       TLorentzVector GNNp4; 		   
+		   GNNp4.SetPxPyPzE(jetGNN.px(), jetGNN.py(), jetGNN.pz(), jetGNN.e());		   
+		   if (GNNp4.DeltaR(genp4)<0.1){
+			   massdiff.push_back((GNNp4.M()-genp4.M())/genp4.M());
+			   h_gnn->Fill((GNNp4.M()-genp4.M())/genp4.M());
 		   }
 	   }
    }
+
+   
    //for(int i=0; i<npf; i++) {SSLscore->push_back(outputs[0][i]);}
    //for(int i=0; i<npf; i++) {std::cout<<outputs[0][i]<<std::endl;} 
 
@@ -270,6 +336,7 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
    iEvent.put(std::move(gen_phi),"genphi");
    iEvent.put(std::move(gen_pt),"genpt");
    iEvent.put(std::move(mass_diff),"massdiff");
+   
 }
 
 
@@ -320,3 +387,4 @@ void SSLPuppiProducer::fillDescriptions(edm::ConfigurationDescriptions& descript
 
 //define this as a plug-in
 DEFINE_FWK_MODULE(SSLPuppiProducer);
+
