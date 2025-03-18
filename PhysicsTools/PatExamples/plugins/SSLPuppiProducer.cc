@@ -44,6 +44,15 @@ public:
   TH1D* h_gnn;
   TH1D* h_pf;
   TH1D* h_puppi;
+
+  TH1D* h_gnn_pt;
+  TH1D* h_pf_pt;
+  TH1D* h_puppi_pt;
+
+  TH1D* h_gnn_mass;
+  TH1D* h_pf_mass;
+  TH1D* h_puppi_mass;
+  std::vector<float> mass_reso_gnn, mass_reso_pf, mass_reso_puppi;
 private:  
   edm::EDGetTokenT<std::vector<pat::PackedGenParticle>> genParticleSrc_;
   const edm::EDGetTokenT<std::vector<pat::PackedCandidate>> pf_token_;
@@ -65,6 +74,33 @@ private:
 //
 // constructors and destructor
 //
+float quantile(const std::vector<float>& input, float q) {
+  std::vector<float> sorted = input;
+  std::sort(sorted.begin(), sorted.end());
+  float pos = q * (sorted.size() - 1);
+  size_t lower = static_cast<size_t>(pos);
+  size_t upper = lower + 1;
+  float weight = pos - lower;
+  if (upper >= sorted.size()) {
+      return sorted[lower];
+  }
+  return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+}
+
+float getResol(const std::vector<float>& input) {
+  return (quantile(input, 0.84) - quantile(input, 0.16)) / 2;
+}
+
+float median(const std::vector<float>& input) {
+  std::vector<float> sorted = input;
+  std::sort(sorted.begin(), sorted.end());
+  size_t size = sorted.size();
+  if (size % 2 == 0) {
+      return (sorted[size / 2 - 1] + sorted[size / 2]) / 2;
+  } else {
+      return sorted[size / 2];
+  }
+}
 SSLPuppiProducer::SSLPuppiProducer(const edm::ParameterSet& cfg)
     :TritonEDProducer<>(cfg),
     genParticleSrc_(mayConsume<std::vector<pat::PackedGenParticle>>(cfg.getParameter<edm::InputTag>("genParticleSrc"))),
@@ -82,6 +118,15 @@ SSLPuppiProducer::SSLPuppiProducer(const edm::ParameterSet& cfg)
   h_gnn = new TH1D("mass_diff_GNN", "Mass diff", 40, -1, 1);
   h_puppi = new TH1D("mass_diff_PUPPI", "Mass diff", 40, -1, 1);
   h_pf = new TH1D("mass_diff_PF", "Mass diff", 40, -1, 1);
+
+  h_gnn_pt = new TH1D("Pt_GNN", "Pt ", 40, 0, 1200);
+  h_puppi_pt = new TH1D("Pt_PUPPI", "Pt", 40, 0, 1200);
+  h_pf_pt = new TH1D("Pt_PF", "Pt", 40, 0, 1200);
+
+  h_gnn_mass = new TH1D("mass_GNN", "Mass ", 40, 0, 400);
+  h_puppi_mass = new TH1D("mass_PUPPI", "Mass", 40, 0, 400);
+  h_pf_mass = new TH1D("mass_PF", "Mass", 40, 0, 400);
+  mass_reso_gnn.clear();mass_reso_pf.clear();mass_reso_puppi.clear();
   /* Examples
   produces<ExampleData2>();
 
@@ -111,6 +156,10 @@ SSLPuppiProducer::~SSLPuppiProducer() {
    h_gnn->GetXaxis()->SetTitle("mass diff");
    h_gnn->GetYaxis()->SetTitle("A.U.");
 
+   h_pf->Scale(1./h_pf->Integral(),"width");
+   h_puppi->Scale(1./h_puppi->Integral(),"width");
+   h_gnn->Scale(1./h_gnn->Integral(),"width");
+
    h_puppi->Draw("h");
    h_gnn->Draw("h,same");
    h_pf->Draw("h,same");
@@ -123,10 +172,80 @@ SSLPuppiProducer::~SSLPuppiProducer() {
    legend->Draw("same");
    
    canvas->SaveAs("hist_mass_diff.png");
+   std::cout<<"PF Mean:"<<median(mass_reso_pf)<<" PF stdv:"<<getResol(mass_reso_pf)<<std::endl;
+   std::cout<<"PUPPI Mean:"<<median(mass_reso_puppi)<<" PUPPI stdv:"<<getResol(mass_reso_puppi)<<std::endl;
+   std::cout<<"SSL Mean:"<<median(mass_reso_gnn)<<" SSL stdv:"<<getResol(mass_reso_gnn)<<std::endl;
    delete canvas;
    delete h_gnn;
    delete h_pf;
    delete h_puppi;
+
+   TCanvas* canvas1 = new TCanvas("canvas1", "Canvas1", 800, 600);
+   h_pf_pt->SetDirectory(0);
+   h_puppi_pt->SetDirectory(0);
+   h_gnn_pt->SetDirectory(0);
+
+   h_pf_pt->SetLineColor(kRed);
+   h_puppi_pt->SetLineColor(kGreen);
+   h_gnn_pt->SetLineColor(kBlue);
+
+   h_pf_pt->SetLineWidth(2);
+   h_puppi_pt->SetLineWidth(2);
+   h_gnn_pt->SetLineWidth(2);
+
+   h_gnn_pt->GetXaxis()->SetTitle("mass diff");
+   h_gnn_pt->GetYaxis()->SetTitle("A.U.");
+
+   h_pf_pt->Scale(1./h_pf_pt->Integral(),"width");
+   h_puppi_pt->Scale(1./h_puppi_pt->Integral(),"width");
+   h_gnn_pt->Scale(1./h_gnn_pt->Integral(),"width");
+
+   h_puppi_pt->Draw("h");
+   h_gnn_pt->Draw("h,same");
+   h_pf_pt->Draw("h,same");
+   
+
+   TLegend* legend1 = new TLegend(0.65, 0.65, 0.8, 0.8);
+   legend1->AddEntry(h_pf_pt, "PF", "l");
+   legend1->AddEntry(h_puppi_pt, "PUPPI", "l");
+   legend1->AddEntry(h_gnn_pt, "SSL", "l");
+   legend1->Draw("same");
+   
+   canvas1->SaveAs("hist_pt.png");
+
+   TCanvas* canvas2 = new TCanvas("canvas2", "Canvas2", 800, 600);
+   h_pf_mass->SetDirectory(0);
+   h_puppi_mass->SetDirectory(0);
+   h_gnn_mass->SetDirectory(0);
+
+   h_pf_mass->SetLineColor(kRed);
+   h_puppi_mass->SetLineColor(kGreen);
+   h_gnn_mass->SetLineColor(kBlue);
+
+   h_pf_mass->SetLineWidth(2);
+   h_puppi_mass->SetLineWidth(2);
+   h_gnn_mass->SetLineWidth(2);
+
+   h_gnn_mass->GetXaxis()->SetTitle("mass diff");
+   h_gnn_mass->GetYaxis()->SetTitle("A.U.");
+
+   h_pf_mass->Scale(1./h_pf_mass->Integral(),"width");
+   h_puppi_mass->Scale(1./h_puppi_mass->Integral(),"width");
+   h_gnn_mass->Scale(1./h_gnn_mass->Integral(),"width");
+
+   h_gnn_mass->Draw("h");
+   h_puppi_mass->Draw("h,same");
+   h_pf_mass->Draw("h,same");
+   
+
+   TLegend* legend2 = new TLegend(0.65, 0.65, 0.8, 0.8);
+   legend2->AddEntry(h_pf_mass, "PF", "l");
+   legend2->AddEntry(h_puppi_mass, "PUPPI", "l");
+   legend2->AddEntry(h_gnn_mass, "SSL", "l");
+   legend2->Draw("same");
+   
+   canvas2->SaveAs("hist_mass.png");
+
 
   
 }
@@ -145,11 +264,12 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
   //input_1.setShape(0, 2);
     
   int num_node=0; int num_edge=0;
-  std::vector<float> pf_eta, pf_phi;
+  std::vector<float> pf_eta, pf_phi, pf_pt;
   size_t i_pf = 0;
 
   for (const auto& pf_count : pfs){
     if (abs(pf_count.eta())>2.5) continue;
+    if (abs(pf_count.pt())<0.5) continue;
     num_node++;
   }
   input_0.setShape(0, num_node);
@@ -158,10 +278,12 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
   auto& vpfnode = (*pfnode)[0];
   for (const auto& pf : pfs){
     if (abs(pf.eta())>2.5) continue;
+    if (abs(pf.pt())<0.5) continue;
     vpfnode.push_back(pf.eta());
     vpfnode.push_back(pf.phi());
     vpfnode.push_back(pf.pt());
-    pf_eta.push_back(pf.eta()); pf_phi.push_back(pf.phi());
+    pf_eta.push_back(pf.eta()); pf_phi.push_back(pf.phi());pf_pt.push_back(pf.pt());
+
 
     if (pf.charge()!=0){
       vpfnode.push_back(1); vpfnode.push_back(0);vpfnode.push_back(0);
@@ -198,6 +320,7 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
   for (unsigned m_count=0; m_count<(pf_eta.size()-1); m_count++){
     for (unsigned n_count=m_count+1; n_count<pf_eta.size();n_count++){
       if ((abs(pf_eta[m_count])>2.5)|(abs(pf_eta[n_count])>2.5)) continue;
+      if ((abs(pf_pt[m_count])<0.5)|(abs(pf_pt[n_count])<0.5)) continue;
       float dphi_, deta_, dR_;
       dphi_ = fabs(pf_phi[m_count]-pf_phi[n_count]);
       deta_ = fabs(pf_eta[m_count]-pf_eta[n_count]);
@@ -212,6 +335,7 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
   for (unsigned m=0; m<(pf_eta.size()-1); m++){
     for (unsigned n=m+1; n<pf_eta.size();n++){
       if ((abs(pf_eta[m])>2.5)|(abs(pf_eta[n])>2.5)) continue;
+      if ((abs(pf_pt[m])<0.5)|(abs(pf_pt[n])<0.5)) continue;
       float dphi, deta, dR;
       dphi = fabs(pf_phi[m]-pf_phi[n]);
       deta = fabs(pf_eta[m]-pf_eta[n]);
@@ -251,7 +375,7 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
    std::vector<fastjet::PseudoJet> puppiJetInputs;
    std::vector<fastjet::PseudoJet> gnnJetInputs;
    for (const auto& pf_count : pfs){
-    if (abs(pf_count.eta())>2.5){
+    if ((abs(pf_count.eta())>2.5)|(abs(pf_count.pt())<0.5)){
      SSLscore->push_back(-1);
      continue;
     } 
@@ -259,9 +383,10 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
     pf_eta->push_back(pf_count.eta());
     pf_phi->push_back(pf_count.phi());
     pf_puppipt->push_back(pf_count.pt()*outputs[0][i]);
-    if ((pf_count.pt()> 0)&&(abs(pf_count.eta())<2.5)) {
+    if ((pf_count.pt()> 0.5)&&(abs(pf_count.eta())<2.5)) {
 	    TLorentzVector pf_,puppi_,gnn_;
 	    pf_.SetPtEtaPhiM(pf_count.pt(),pf_count.eta(),pf_count.phi(),0);
+      //if (pf_count.charge()==0) std::cout<<"pf_pt: "<<pf_count.pt()<<"pf_eta: "<<pf_count.eta()<<"SSLscore:"<<outputs[0][i]<<std::endl;
       if (pf_count.charge()==0) gnn_.SetPtEtaPhiM(pf_count.pt()*outputs[0][i],pf_count.eta(),pf_count.phi(),0);
       else gnn_.SetPtEtaPhiM(pf_count.pt()*pf_count.puppiWeight(),pf_count.eta(),pf_count.phi(),0);
       puppi_.SetPtEtaPhiM(pf_count.pt()*pf_count.puppiWeight(),pf_count.eta(),pf_count.phi(),0);
@@ -274,6 +399,10 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
    std::vector<fastjet::PseudoJet> GenJetInputs;
    for(const auto& particle : *genParticles){
 	   if(particle.status()!=1) continue;
+     if(abs(particle.pdgId())==12) continue;
+     if(abs(particle.pdgId())==14) continue;
+     if(abs(particle.pdgId())==16) continue;
+     if(abs(particle.eta())>2.5) continue;
     gen_eta->push_back(particle.eta());
     gen_pt->push_back(particle.pt());
     gen_phi->push_back(particle.phi());    
@@ -289,11 +418,11 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
    fastjet::ClusterSequence csGNN(gnnJetInputs, jetDef);
    fastjet::ClusterSequence csPUPPI(puppiJetInputs, jetDef);
    fastjet::ClusterSequence csGen(GenJetInputs, jetDef);
-
-   std::vector<fastjet::PseudoJet> jetsPf = sorted_by_pt(csPf.inclusive_jets());
-   std::vector<fastjet::PseudoJet> jetsPUPPI = sorted_by_pt(csPUPPI.inclusive_jets());
-   std::vector<fastjet::PseudoJet> jetsGNN = sorted_by_pt(csGNN.inclusive_jets());
-   std::vector<fastjet::PseudoJet> jetsGen = sorted_by_pt(csGen.inclusive_jets());
+   float JetPtmin=150;
+   std::vector<fastjet::PseudoJet> jetsPf = sorted_by_pt(csPf.inclusive_jets(JetPtmin));
+   std::vector<fastjet::PseudoJet> jetsPUPPI = sorted_by_pt(csPUPPI.inclusive_jets(JetPtmin));
+   std::vector<fastjet::PseudoJet> jetsGNN = sorted_by_pt(csGNN.inclusive_jets(JetPtmin));
+   std::vector<fastjet::PseudoJet> jetsGen = sorted_by_pt(csGen.inclusive_jets(JetPtmin));
    
    std::vector<float> massdiff;
    //Matching & calculate invmass
@@ -302,24 +431,32 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
       genp4.SetPxPyPzE(jetGen.px(), jetGen.py(), jetGen.pz(), jetGen.e());
 	    for (const auto& jetpf : jetsPf){
        TLorentzVector pfp4; 		   
-		   pfp4.SetPxPyPzE(jetpf.px(), jetpf.py(), jetpf.pz(), jetpf.e());		   
+		   pfp4.SetPxPyPzE(jetpf.px(), jetpf.py(), jetpf.pz(), jetpf.e());
+       	  
 		   if (pfp4.DeltaR(genp4)<0.1){
 			   h_pf->Fill((pfp4.M()-genp4.M())/genp4.M());
+         h_pf_mass->Fill(pfp4.M());
+         h_pf_pt->Fill(pfp4.Pt());
+         mass_reso_pf.push_back((pfp4.M()-genp4.M())/genp4.M());
 		   }
 	   }
      for (const auto& jetpuppi : jetsPUPPI){
        TLorentzVector puppip4; 		   
-		   puppip4.SetPxPyPzE(jetpuppi.px(), jetpuppi.py(), jetpuppi.pz(), jetpuppi.e());		   
+		   puppip4.SetPxPyPzE(jetpuppi.px(), jetpuppi.py(), jetpuppi.pz(), jetpuppi.e());	
 		   if (puppip4.DeltaR(genp4)<0.1){
 			   h_puppi->Fill((puppip4.M()-genp4.M())/genp4.M());
+         h_puppi_mass->Fill(puppip4.M());h_puppi_pt->Fill(puppip4.Pt());
+         mass_reso_puppi.push_back((puppip4.M()-genp4.M())/genp4.M());
 		   }
 	   }
      for (const auto& jetGNN : jetsGNN){
        TLorentzVector GNNp4; 		   
-		   GNNp4.SetPxPyPzE(jetGNN.px(), jetGNN.py(), jetGNN.pz(), jetGNN.e());		   
+		   GNNp4.SetPxPyPzE(jetGNN.px(), jetGNN.py(), jetGNN.pz(), jetGNN.e());		
 		   if (GNNp4.DeltaR(genp4)<0.1){
 			   massdiff.push_back((GNNp4.M()-genp4.M())/genp4.M());
 			   h_gnn->Fill((GNNp4.M()-genp4.M())/genp4.M());
+         h_gnn_mass->Fill(GNNp4.M());h_gnn_pt->Fill(GNNp4.Pt());
+         mass_reso_gnn.push_back((GNNp4.M()-genp4.M())/genp4.M());
 		   }
 	   }
    }
@@ -387,4 +524,3 @@ void SSLPuppiProducer::fillDescriptions(edm::ConfigurationDescriptions& descript
 
 //define this as a plug-in
 DEFINE_FWK_MODULE(SSLPuppiProducer);
-
