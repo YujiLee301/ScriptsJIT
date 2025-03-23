@@ -29,7 +29,7 @@
 //
 // class declaration
 //
-
+const double pi = 3.14159265358979323846;
 class SSLPuppiProducer : public TritonEDProducer<> {
 public:
   explicit SSLPuppiProducer(const edm::ParameterSet&);
@@ -255,6 +255,7 @@ SSLPuppiProducer::~SSLPuppiProducer() {
 
 // ------------ method called to produce the data  ------------
 void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& iSetup, Input& iInput){
+  client_->setBatchSize(1);
   auto const& pfs = iEvent.get(pf_token_);
   npf = 0;
   auto& input_0 = iInput.at("INPUT0");
@@ -262,14 +263,13 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
   auto& input_1 = iInput.at("INPUT1");
   //input_0.setShape(1, 10);
   //input_1.setShape(0, 2);
-    
+  
   int num_node=0; int num_edge=0;
   std::vector<float> pf_eta, pf_phi, pf_pt;
   size_t i_pf = 0;
 
   for (const auto& pf_count : pfs){
-    if (abs(pf_count.eta())>2.5) continue;
-    if (abs(pf_count.pt())<0.5) continue;
+    if (abs(pf_count.eta())>2.4) continue;
     num_node++;
   }
   input_0.setShape(0, num_node);
@@ -277,78 +277,77 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
   auto pfnode = input_0.allocate<float>();
   auto& vpfnode = (*pfnode)[0];
   for (const auto& pf : pfs){
-    if (abs(pf.eta())>2.5) continue;
-    if (abs(pf.pt())<0.5) continue;
+    if (abs(pf.eta())>2.4) continue;
     vpfnode.push_back(pf.eta());
     vpfnode.push_back(pf.phi());
     vpfnode.push_back(pf.pt());
     pf_eta.push_back(pf.eta()); pf_phi.push_back(pf.phi());pf_pt.push_back(pf.pt());
-
-
+    if(pf.pt()<0.1) std::cout<<pf.pt()<<std::endl;
     if (pf.charge()!=0){
       vpfnode.push_back(1); vpfnode.push_back(0);vpfnode.push_back(0);
     }
     if (pf.charge()==0){
-      if (abs(pf.pdgId())==22){
+      if (pf.pdgId()==22){
         vpfnode.push_back(0);vpfnode.push_back(1);vpfnode.push_back(0);
-      }
-      else if (abs(pf.pdgId())==130){
-        vpfnode.push_back(0);vpfnode.push_back(0);vpfnode.push_back(1);
       }
       else {
         vpfnode.push_back(0);vpfnode.push_back(0);vpfnode.push_back(1);
       }
     }
-
     if (pf.charge()!=0){
-      if (pf.puppiWeight()<0.1){
-        vpfnode.push_back(1); vpfnode.push_back(0);vpfnode.push_back(0);
+      if (pf.puppiWeight()==1){
+        vpfnode.push_back(0); vpfnode.push_back(1);vpfnode.push_back(0);
       }
       else{
-        vpfnode.push_back(0); vpfnode.push_back(1);vpfnode.push_back(0);
+        vpfnode.push_back(1); vpfnode.push_back(0);vpfnode.push_back(0);
       }
     }
     if (pf.charge()==0){
       vpfnode.push_back(0); vpfnode.push_back(0);vpfnode.push_back(1);
     }
-  
     vpfnode.push_back(0);
     i_pf++;
     if (i_pf == max_n_pf_)  break;
   }
   if (pf_eta.size()==0) return;
-  for (unsigned m_count=0; m_count<(pf_eta.size()-1); m_count++){
-    for (unsigned n_count=m_count+1; n_count<pf_eta.size();n_count++){
-      if ((abs(pf_eta[m_count])>2.5)|(abs(pf_eta[n_count])>2.5)) continue;
-      if ((abs(pf_pt[m_count])<0.5)|(abs(pf_pt[n_count])<0.5)) continue;
+  for (unsigned m_count=0; m_count<pf_eta.size(); m_count++){
+    for (unsigned n_count=0; n_count<pf_eta.size();n_count++){
       float dphi_, deta_, dR_;
       dphi_ = fabs(pf_phi[m_count]-pf_phi[n_count]);
       deta_ = fabs(pf_eta[m_count]-pf_eta[n_count]);
-      if(dphi_>3.14159) dphi_ = 2*3.14159 - dphi_;
+      if(dphi_>pi){
+        float temp_;temp_ = std::ceil((dphi_ - pi)/(2*pi))*(2*pi);
+        dphi_ = dphi_ - temp_;
+      } 
       dR_ = sqrt(dphi_*dphi_ + deta_*deta_);
+      if(m_count==n_count) continue;
       if(dR_<deltaRcut) num_edge++;
     }
   }
   input_1.setShape(1, num_edge);
   auto pfedge = input_1.allocate<long>();
   auto& vpfedge = (*pfedge)[0];
-  for (unsigned m=0; m<(pf_eta.size()-1); m++){
-    for (unsigned n=m+1; n<pf_eta.size();n++){
-      if ((abs(pf_eta[m])>2.5)|(abs(pf_eta[n])>2.5)) continue;
-      if ((abs(pf_pt[m])<0.5)|(abs(pf_pt[n])<0.5)) continue;
+  for (unsigned m=0; m<pf_eta.size(); m++){
+    for (unsigned n=0; n<pf_eta.size();n++){
       float dphi, deta, dR;
       dphi = fabs(pf_phi[m]-pf_phi[n]);
       deta = fabs(pf_eta[m]-pf_eta[n]);
-      if(dphi>3.14159) dphi = 2*3.14159 - dphi;
+      if(dphi>pi){
+        float temp;temp = std::ceil((dphi - pi)/(2*pi))*(2*pi);
+        dphi = dphi - temp;
+      } 
       dR = sqrt(dphi*dphi + deta*deta);
       
       if(dR<deltaRcut){
         long m_long, n_long;
         m_long = m; n_long = n;
+        if(m==n) continue;
         vpfedge.push_back(m_long);vpfedge.push_back(n_long);
       }
     }
   } 
+  vpfnode.resize(8*max_n_pf_);
+  vpfedge.resize(2*max_n_pf_);
   input_0.toServer(pfnode);
   input_1.toServer(pfedge);
 
@@ -356,6 +355,7 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
 
 
 void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup, Output const& iOutput) {
+   
    const auto& output0 = iOutput.at("OUTPUT0");
    const auto& outputs = output0.fromServer<float>(); 
    //std::auto_ptr<std::vector<float> > SSLscore( new std::vector<float> );
@@ -374,8 +374,11 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
    std::vector<fastjet::PseudoJet> pfJetInputs;
    std::vector<fastjet::PseudoJet> puppiJetInputs;
    std::vector<fastjet::PseudoJet> gnnJetInputs;
+   //bool keepIt=true;
+   int LV_num,PU_num;
+   LV_num = 0; PU_num = 0;
    for (const auto& pf_count : pfs){
-    if ((abs(pf_count.eta())>2.5)|(abs(pf_count.pt())<0.5)){
+    if ((abs(pf_count.eta())>2.4)){
      SSLscore->push_back(-1);
      continue;
     } 
@@ -383,10 +386,13 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
     pf_eta->push_back(pf_count.eta());
     pf_phi->push_back(pf_count.phi());
     pf_puppipt->push_back(pf_count.pt()*outputs[0][i]);
-    if ((pf_count.pt()> 0.5)&&(abs(pf_count.eta())<2.5)) {
+    if ((pf_count.charge()!=0) && (pf_count.pt() > 0.5) && (pf_count.fromPV()>2)&& (pf_count.puppiWeight()>0.99)) LV_num++;
+    if ((pf_count.charge()!=0) && (pf_count.pt() > 0.5) && (pf_count.fromPV()<1)&& (pf_count.puppiWeight()<0.01)) PU_num++;
+    
+    if (pf_count.pt()> 0.5) {
 	    TLorentzVector pf_,puppi_,gnn_;
 	    pf_.SetPtEtaPhiM(pf_count.pt(),pf_count.eta(),pf_count.phi(),0);
-      //if (pf_count.charge()==0) std::cout<<"pf_pt: "<<pf_count.pt()<<"pf_eta: "<<pf_count.eta()<<"SSLscore:"<<outputs[0][i]<<std::endl;
+      //if (pf_count.charge()!=0) std::cout<<"pf_pt: "<<pf_count.pt()<<"puppi: "<<pf_count.puppiWeight()<<"SSLscore:"<<outputs[0][i]<<std::endl;
       if (pf_count.charge()==0) gnn_.SetPtEtaPhiM(pf_count.pt()*outputs[0][i],pf_count.eta(),pf_count.phi(),0);
       else gnn_.SetPtEtaPhiM(pf_count.pt()*pf_count.puppiWeight(),pf_count.eta(),pf_count.phi(),0);
       puppi_.SetPtEtaPhiM(pf_count.pt()*pf_count.puppiWeight(),pf_count.eta(),pf_count.phi(),0);
@@ -396,6 +402,7 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
         }
     i++;
    }
+   
    std::vector<fastjet::PseudoJet> GenJetInputs;
    for(const auto& particle : *genParticles){
 	   if(particle.status()!=1) continue;
@@ -425,8 +432,12 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
    std::vector<fastjet::PseudoJet> jetsGen = sorted_by_pt(csGen.inclusive_jets(JetPtmin));
    
    std::vector<float> massdiff;
+   
+   //if((LV_num<5)||(PU_num<50)) keepIt = false;
+   //if(keepIt){
    //Matching & calculate invmass
    for (const auto& jetGen : jetsGen) {
+    if((LV_num<5)||(PU_num<50)) continue;
       TLorentzVector genp4;
       genp4.SetPxPyPzE(jetGen.px(), jetGen.py(), jetGen.pz(), jetGen.e());
 	    for (const auto& jetpf : jetsPf){
@@ -460,11 +471,7 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
 		   }
 	   }
    }
-
    
-   //for(int i=0; i<npf; i++) {SSLscore->push_back(outputs[0][i]);}
-   //for(int i=0; i<npf; i++) {std::cout<<outputs[0][i]<<std::endl;} 
-
    iEvent.put(std::move(SSLscore),"SSLscore");
    iEvent.put(std::move(pf_eta),"pfeta");
    iEvent.put(std::move(pf_phi),"pfphi");
@@ -474,7 +481,12 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
    iEvent.put(std::move(gen_pt),"genpt");
    iEvent.put(std::move(mass_diff),"massdiff");
    
-}
+   
+   //for(int i=0; i<npf; i++) {SSLscore->push_back(outputs[0][i]);}
+   //for(int i=0; i<npf; i++) {std::cout<<outputs[0][i]<<std::endl;} 
+
+   
+  }
 
 
 
