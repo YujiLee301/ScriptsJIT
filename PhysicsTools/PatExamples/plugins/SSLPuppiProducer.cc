@@ -52,6 +52,10 @@ public:
   TH1D* h_gnn_mass;
   TH1D* h_pf_mass;
   TH1D* h_puppi_mass;
+
+  TH1D* h_LV_score;
+  TH1D* h_PU_score;
+  TH1D* h_NE_score;
   std::vector<float> mass_reso_gnn, mass_reso_pf, mass_reso_puppi;
 private:  
   edm::EDGetTokenT<std::vector<pat::PackedGenParticle>> genParticleSrc_;
@@ -126,6 +130,10 @@ SSLPuppiProducer::SSLPuppiProducer(const edm::ParameterSet& cfg)
   h_gnn_mass = new TH1D("mass_GNN", "Mass ", 40, 0, 400);
   h_puppi_mass = new TH1D("mass_PUPPI", "Mass", 40, 0, 400);
   h_pf_mass = new TH1D("mass_PF", "Mass", 40, 0, 400);
+
+ h_LV_score = new TH1D("LV SSL", "LV SSL", 40, 0, 1);
+  h_PU_score = new TH1D("PU SSL", "PU SSL", 40, 0, 1);
+  h_NE_score = new TH1D("NE SSL", "NE SSL", 40, 0, 1);
   mass_reso_gnn.clear();mass_reso_pf.clear();mass_reso_puppi.clear();
   /* Examples
   produces<ExampleData2>();
@@ -160,8 +168,8 @@ SSLPuppiProducer::~SSLPuppiProducer() {
    h_puppi->Scale(1./h_puppi->Integral(),"width");
    h_gnn->Scale(1./h_gnn->Integral(),"width");
 
-   h_puppi->Draw("h");
-   h_gnn->Draw("h,same");
+   h_gnn->Draw("h");
+   h_puppi->Draw("h,same");
    h_pf->Draw("h,same");
    
 
@@ -246,6 +254,41 @@ SSLPuppiProducer::~SSLPuppiProducer() {
    
    canvas2->SaveAs("hist_mass.png");
 
+  TCanvas* canvas3 = new TCanvas("canvas3", "Canvas3", 800, 600);
+   h_LV_score->SetDirectory(0);
+   h_PU_score->SetDirectory(0);
+   h_NE_score->SetDirectory(0);
+
+   h_LV_score->SetLineColor(kGreen);
+   h_PU_score->SetLineColor(kBlue);
+   h_NE_score->SetLineColor(kRed);
+
+   h_LV_score->SetLineWidth(2);
+   h_PU_score->SetLineWidth(2);
+   h_NE_score->SetLineWidth(2);
+
+   h_LV_score->GetXaxis()->SetTitle("SSL weight");
+   h_PU_score->GetYaxis()->SetTitle("A.U.");
+
+   h_LV_score->Scale(1./h_LV_score->Integral(),"width");
+   h_PU_score->Scale(1./h_PU_score->Integral(),"width");
+   h_NE_score->Scale(1./h_NE_score->Integral(),"width");
+
+   h_NE_score->Draw("h");
+   h_LV_score->Draw("h,same");
+   h_PU_score->Draw("h,same");
+   
+   
+
+   TLegend* legend3 = new TLegend(0.65, 0.65, 0.8, 0.8);
+   legend3->AddEntry(h_LV_score, "LV chg", "l");
+   legend3->AddEntry(h_PU_score, "PU chg", "l");
+   legend3->AddEntry(h_NE_score, "neu ", "l");
+   legend3->Draw("same");
+   
+   canvas3->SaveAs("hist_SSL_weight.png");
+
+
 
   
 }
@@ -267,48 +310,55 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
   int num_node=0; int num_edge=0;
   std::vector<float> pf_eta, pf_phi, pf_pt;
   size_t i_pf = 0;
+  int dim;
 
   for (const auto& pf_count : pfs){
-    if (abs(pf_count.eta())>2.4) continue;
+    
+    if (abs(pf_count.eta())>2.5) continue;
     num_node++;
   }
   input_0.setShape(0, num_node);
   npf = num_node;
   auto pfnode = input_0.allocate<float>();
   auto& vpfnode = (*pfnode)[0];
+  vpfnode.clear();
   for (const auto& pf : pfs){
-    if (abs(pf.eta())>2.4) continue;
+    dim = 0;
+    if (abs(pf.eta())>2.5) continue;
     vpfnode.push_back(pf.eta());
     vpfnode.push_back(pf.phi());
     vpfnode.push_back(pf.pt());
+    dim += 3;
     pf_eta.push_back(pf.eta()); pf_phi.push_back(pf.phi());pf_pt.push_back(pf.pt());
     if(pf.pt()<0.1) std::cout<<pf.pt()<<std::endl;
     if (pf.charge()!=0){
-      vpfnode.push_back(1); vpfnode.push_back(0);vpfnode.push_back(0);
+      vpfnode.push_back(1); vpfnode.push_back(0);vpfnode.push_back(0);dim += 3;
     }
     if (pf.charge()==0){
       if (pf.pdgId()==22){
-        vpfnode.push_back(0);vpfnode.push_back(1);vpfnode.push_back(0);
+        vpfnode.push_back(0);vpfnode.push_back(1);vpfnode.push_back(0);dim += 3;
       }
       else {
-        vpfnode.push_back(0);vpfnode.push_back(0);vpfnode.push_back(1);
+        vpfnode.push_back(0);vpfnode.push_back(0);vpfnode.push_back(1);dim += 3;
       }
     }
     if (pf.charge()!=0){
       if (pf.puppiWeight()==1){
-        vpfnode.push_back(0); vpfnode.push_back(1);vpfnode.push_back(0);
+        vpfnode.push_back(0); vpfnode.push_back(1);vpfnode.push_back(0);dim += 3;
       }
       else{
-        vpfnode.push_back(1); vpfnode.push_back(0);vpfnode.push_back(0);
+        vpfnode.push_back(1); vpfnode.push_back(0);vpfnode.push_back(0);dim += 3;
       }
     }
     if (pf.charge()==0){
-      vpfnode.push_back(0); vpfnode.push_back(0);vpfnode.push_back(1);
+      vpfnode.push_back(0); vpfnode.push_back(0);vpfnode.push_back(1);dim += 3;
     }
-    vpfnode.push_back(0);
+    vpfnode.push_back(0);dim += 1;
     i_pf++;
     if (i_pf == max_n_pf_)  break;
+    //std::cout<<"node dim: "<<dim<<std::endl;
   }
+  
   if (pf_eta.size()==0) return;
   for (unsigned m_count=0; m_count<pf_eta.size(); m_count++){
     for (unsigned n_count=0; n_count<pf_eta.size();n_count++){
@@ -327,6 +377,9 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
   input_1.setShape(1, num_edge);
   auto pfedge = input_1.allocate<long>();
   auto& vpfedge = (*pfedge)[0];
+  vpfedge.clear();
+  std::vector<long> edgeline1;std::vector<long> edgeline2;
+  edgeline1.clear();edgeline2.clear();
   for (unsigned m=0; m<pf_eta.size(); m++){
     for (unsigned n=0; n<pf_eta.size();n++){
       float dphi, deta, dR;
@@ -342,12 +395,21 @@ void SSLPuppiProducer::acquire(edm::Event const& iEvent, edm::EventSetup const& 
         long m_long, n_long;
         m_long = m; n_long = n;
         if(m==n) continue;
-        vpfedge.push_back(m_long);vpfedge.push_back(n_long);
+        //vpfedge.push_back(m_long);vpfedge.push_back(n_long);
+        edgeline1.push_back(m_long);edgeline2.push_back(n_long);
       }
     }
   } 
+
+  for(unsigned e1=0; e1<edgeline1.size(); e1++){
+    vpfedge.push_back(edgeline1[e1]);
+  }
+
+  for(unsigned  e2=0; e2<edgeline2.size(); e2++){
+    vpfedge.push_back(edgeline2[e2]);
+  }
   vpfnode.resize(8*max_n_pf_);
-  vpfedge.resize(2*max_n_pf_);
+  //vpfedge.resize(2*max_n_pf_);
   input_0.toServer(pfnode);
   input_1.toServer(pfedge);
 
@@ -378,7 +440,7 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
    int LV_num,PU_num;
    LV_num = 0; PU_num = 0;
    for (const auto& pf_count : pfs){
-    if ((abs(pf_count.eta())>2.4)){
+    if ((abs(pf_count.eta())>2.5)){
      SSLscore->push_back(-1);
      continue;
     } 
@@ -393,6 +455,11 @@ void SSLPuppiProducer::produce(edm::Event& iEvent, edm::EventSetup const& iSetup
 	    TLorentzVector pf_,puppi_,gnn_;
 	    pf_.SetPtEtaPhiM(pf_count.pt(),pf_count.eta(),pf_count.phi(),0);
       //if (pf_count.charge()!=0) std::cout<<"pf_pt: "<<pf_count.pt()<<"puppi: "<<pf_count.puppiWeight()<<"SSLscore:"<<outputs[0][i]<<std::endl;
+      if(pf_count.charge()!=0){
+        if(pf_count.puppiWeight()>0.99) h_LV_score->Fill(outputs[0][i]);
+        if(pf_count.puppiWeight()<0.01) h_PU_score->Fill(outputs[0][i]);
+      }
+      if(pf_count.charge()==0) h_NE_score->Fill(outputs[0][i]);
       if (pf_count.charge()==0) gnn_.SetPtEtaPhiM(pf_count.pt()*outputs[0][i],pf_count.eta(),pf_count.phi(),0);
       else gnn_.SetPtEtaPhiM(pf_count.pt()*pf_count.puppiWeight(),pf_count.eta(),pf_count.phi(),0);
       puppi_.SetPtEtaPhiM(pf_count.pt()*pf_count.puppiWeight(),pf_count.eta(),pf_count.phi(),0);
